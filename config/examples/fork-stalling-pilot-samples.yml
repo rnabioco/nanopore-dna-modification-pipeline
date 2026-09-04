@@ -1,0 +1,8 @@
+runs:
+  - path: /beevol/home/<user>/Nanopore/Fork_Stalling_Pilot1_090326/results
+    basecalled: true
+    samples:
+      fork_12: barcode12
+      fork_13: barcode13
+      fork_14: barcode14
+      fork_15: barcode15

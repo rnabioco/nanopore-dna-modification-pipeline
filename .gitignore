@@ -1,0 +1,50 @@
+# Test data and outputs (the download/fixture scripts are tracked, the data is not)
+.tests/*
+!.tests/*.sh
+!.tests/fixtures/
+!.tests/fixtures/**/README.md
+!.tests/fixtures/**/*.pod5
+.tests/fixtures/**/*.fai
+.snakemake
+logs
+.DS_Store
+.vscode
+results/
+
+# Tools and models installed by `pixi run setup` (dorado, escpod, DNAscent .sif)
+resources/tools/*
+# ONT models are downloaded by name; custom (vendored) models live under
+# resources/models/custom and ARE tracked, with a README beside each.
+resources/models/*
+!resources/models/custom/
+!resources/models/README.md
+# Reference genomes are pointed at, never copied here
+resources/ref/*
+!resources/ref/README.md
+
+# Bulk data never belongs in the repo (see ~/.claude/CLAUDE.md space rules)
+*.bam
+*.bai
+*.pod5
+*.fast5
+*.cram
+*.npz
+*.npy
+*.parquet
+*.fastq
+*.fq.gz
+*.mmi
+*.sif
+# pod5 migration scratch dirs
+.tmp_pod5_v?_v?_migration_*/
+
+# pixi
+.pixi/
+# python
+__pycache__/
+.coverage
+.pytest_cache/
+.ruff_cache/
+
+# Worktrees created by Claude Code live inside the repo.
+.claude/worktrees/

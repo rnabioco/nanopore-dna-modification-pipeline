@@ -1,0 +1,4 @@
+# sample_id    run_directory (pod5 searched under pod5_pass/pod5_fail/pod5, recursively)
+synthetic1    .tests/data/synthetic/run1
+synthetic2    .tests/data/synthetic/run2
+synthetic2    .tests/data/synthetic/run3

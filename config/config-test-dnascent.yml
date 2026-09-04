@@ -1,0 +1,8 @@
+# Layer over config-test.yml to add the DNAscent rules:
+#   snakemake -n --configfile config/config-test.yml config/config-test-dnascent.yml
+# Uses the pinned image from `pixi run install-dnascent` (a dry run only warns
+# when it is absent, so CI can still build the DAG). CPU mode so the smoke
+# test can run on any node with the image.
+dnascent:
+  enabled: true
+  gpu: false

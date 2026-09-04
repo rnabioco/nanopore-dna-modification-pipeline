@@ -1,0 +1,32 @@
+# Test configuration: the synthetic dorado POD5 fixture from `pixi run
+# dl-test-data` against a lambda + E. coli reference.
+#
+# The fixture reads are synthetic (2048 samples each, flow cell "TEST"), so a
+# real run produces a valid but nearly empty set of outputs. It exists to
+# build the DAG in CI (`pixi run dry-run`) and to smoke-test every rule on a
+# GPU node (`pixi run test`). For a meaningful end-to-end test, point
+# `samples` at a fixture built from a real run with `pixi run make-test-data`.
+
+samples: config/samples-test.tsv
+output_directory: .tests/outputs
+
+reference:
+  fasta: .tests/data/ref/lambda_ecoli.fasta
+
+modkit:
+  bigwig: true
+
+# Exercise the custom-step machinery with a trivial step.
+custom:
+  - name: read_count
+    scope: sample
+    command: "samtools view -c {bam} > {outdir}/{sample}.read_count.txt"
+    outputs: ["{sample}.read_count.txt"]
+    threads: 1
+    mem_mb: 2000
+  - name: bam_list
+    scope: project
+    command: "printf '%s\\n' {bams} > {outdir}/bams.txt"
+    outputs: ["bams.txt"]
+    threads: 1
+    mem_mb: 1000

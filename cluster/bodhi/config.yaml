@@ -1,0 +1,149 @@
+# Snakemake Slurm profile for Bodhi.
+#   pixi run run-bodhi --configfile config/<project>.yml
+#
+# Partitions: `rna` (rnabioco CPU nodes, account rbi), `gpu` (3 nodes, 4x A30
+# each, account gpu_rbi; 3-day limit). Never `interactive`.
+# DefMemPerCPU is 4000 MB, so mem_mb is always set explicitly here.
+
+executor: slurm
+jobs: 100
+latency-wait: 60
+
+rerun-incomplete: true
+keep-going: true
+printshellcmds: true
+show-failed-logs: true
+
+slurm-logdir: "logs/slurm"
+slurm-keep-successful-logs: false
+slurm-delete-logfiles-older-than: 10
+
+# squeue rather than sacct: a controller driven from inside a compute-node
+# session cannot always reach slurmdbd, and with sacct that failure is silent
+# (the pipeline stops making progress after its first batch).
+slurm-status-command: squeue
+
+# No profile-wide slurm-qos: the plugin appends it AFTER any per-rule `qos`
+# resource, which would override a rule's own choice.
+
+default-resources:
+  slurm_partition: rna
+  slurm_account: rbi
+  runtime: "4h"
+  mem_mb: 8000
+  cpus_per_task: 2
+
+set-resources:
+  # ------------------------------------------------------------------ GPU --
+  # dorado scales across every visible GPU. gpu:2 rather than gpu:4 because a
+  # 4-GPU request needs an empty node and can wait half a day behind a single
+  # unrelated 1-GPU job (measured 2026-09-03 on this partition). Memory is a
+  # BUDGET here: dorado grows its arena to whatever the cgroup allows.
+  # There is no wall-clock resume from a redirect, but dorado.resume keeps
+  # the partial output and passes --resume-from on the next attempt, so a
+  # killed job loses only the reads in flight. Check `scontrol show
+  # reservation` before relying on a long runtime.
+  basecall:
+    slurm_partition: gpu
+    slurm_account: gpu_rbi
+    gres: "gpu:2"
+    runtime: "36h"
+    mem_mb: 96000
+    cpus_per_task: 12
+  basecall_run:
+    slurm_partition: gpu
+    slurm_account: gpu_rbi
+    gres: "gpu:2"
+    runtime: "48h"
+    mem_mb: 128000
+    cpus_per_task: 12
+  # DNAscent detect inside the container: one GPU (TensorFlow uses device 0
+  # of the allocation; DNAscent can address only one), CPU threads feed the
+  # event alignment. UNMEASURED on the GPU path: see issue #1 for the sizing
+  # plan. CPU-only reference (8 threads, manual runs, 2026-09-03): ~72 Mb of
+  # aligned sequence per hour, MaxRSS 12-15 GiB independent of input size.
+  # With dnascent.gpu: false move this rule to `rna` and raise cpus_per_task.
+  dnascent_detect:
+    slurm_partition: gpu
+    slurm_account: gpu_rbi
+    gres: "gpu:1"
+    runtime: "24h"
+    mem_mb: 64000
+    cpus_per_task: 16
+  # ------------------------------------------------------------------ CPU --
+  align:
+    runtime: "12h"
+    mem_mb: 48000
+    cpus_per_task: 16
+  demux_run:
+    runtime: "6h"
+    mem_mb: 16000
+    cpus_per_task: 8
+  collect_demuxed_sample:
+    runtime: "2h"
+    mem_mb: 8000
+    cpus_per_task: 4
+  collect_minknow_bams:
+    runtime: "2h"
+    mem_mb: 8000
+    cpus_per_task: 4
+  mm2_index:
+    runtime: "2h"
+    mem_mb: 24000
+    cpus_per_task: 4
+  modkit_pileup:
+    runtime: "8h"
+    mem_mb: 32000
+    cpus_per_task: 8
+  modkit_summary:
+    runtime: "2h"
+    mem_mb: 8000
+    cpus_per_task: 4
+  modkit_extract_calls:
+    runtime: "12h"
+    mem_mb: 48000
+    cpus_per_task: 8
+  modkit_bigwig:
+    runtime: "2h"
+    mem_mb: 16000
+    cpus_per_task: 4
+  modkit_dmr:
+    runtime: "6h"
+    mem_mb: 32000
+    cpus_per_task: 8
+  samtools_qc:
+    runtime: "2h"
+    mem_mb: 8000
+    cpus_per_task: 4
+  mosdepth:
+    runtime: "2h"
+    mem_mb: 8000
+    cpus_per_task: 4
+  dorado_read_summary:
+    runtime: "2h"
+    mem_mb: 8000
+    cpus_per_task: 2
+  dnascent_index:
+    runtime: "2h"
+    mem_mb: 8000
+    cpus_per_task: 1
+  dnascent_sort:
+    runtime: "4h"
+    mem_mb: 16000
+    cpus_per_task: 4
+  dnascent_per_read:
+    runtime: "4h"
+    mem_mb: 8000
+    cpus_per_task: 1
+  # Generous: the pilot barcodes took 4-9 min and 0.5-0.7 GB at 8 threads
+  # (issue #1); re-size once a full-flowcell barcode has been run.
+  dnascent_forksense:
+    runtime: "8h"
+    mem_mb: 32000
+    cpus_per_task: 8
+  custom_sample_step:
+    runtime: "6h"
+    cpus_per_task: 4
+  custom_project_step:
+    runtime: "6h"
+    cpus_per_task: 4

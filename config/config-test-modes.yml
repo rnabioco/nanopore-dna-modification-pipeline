@@ -1,0 +1,16 @@
+# Test config for the other two input modes: a barcoded run basecalled by the
+# pipeline (demux) and a MinKNOW-basecalled run (prebasecalled). Built by
+# `pixi run dl-test-data` from the synthetic reads; DAG construction only.
+samples: config/samples-test-modes.yml
+output_directory: .tests/outputs-modes
+
+reference:
+  fasta: .tests/data/ref/lambda_ecoli.fasta
+
+models:
+  simplex: dna_r10.4.1_e8.2_400bps_sup@v5.2.0
+  modified_bases: [5mCG_5hmCG, 6mA]
+
+dmr:
+  contrasts:
+    - {name: bc02_vs_bc01, a: pooled_bc02, b: pooled_bc01, base: C}

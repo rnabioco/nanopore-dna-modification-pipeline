@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, claude/**]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: prefix-dev/setup-pixi@v0.10.2
+      - name: Run unit tests with coverage
+        run: pixi run -e test pytest tests/unit/ -v --cov=workflow/scripts --cov-report=term-missing
+
+  dag:
+    name: Snakemake DAG (dry run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: prefix-dev/setup-pixi@v0.10.2
+      - name: Snakemake version
+        run: pixi run snakemake --version
+      - name: Download test fixture
+        run: pixi run dl-test-data
+      - name: Resolve the model stack
+        run: pixi run list-models
+      # No dorado, no GPU in CI: the dry run only builds the DAG. The
+      # "dorado is not installed" warning is expected here.
+      - name: Dry run (test config)
+        run: pixi run dry-run
+      - name: Dry run (demux + MinKNOW-basecalled modes)
+        run: pixi run dry-run-modes
+      - name: Dry run with DNAscent enabled
+        run: pixi run dry-run-dnascent
+
+  config-validation:
+    name: Configuration validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: prefix-dev/setup-pixi@v0.10.2
+      - name: YAML parses
+        run: |
+          for f in config/*.yml config/examples/*.yml cluster/*/config.yaml; do
+            pixi run python -c "import yaml,sys; yaml.safe_load(open('$f'))" && echo "ok $f"
+          done
+      - name: Required directories
+        run: |
+          for d in workflow/rules workflow/scripts config cluster/bodhi cluster/alpine scripts tests/unit; do
+            test -d "$d" || { echo "missing $d"; exit 1; }
+          done

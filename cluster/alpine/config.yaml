@@ -1,0 +1,146 @@
+# Snakemake Slurm profile for Alpine (CU Boulder / CURC).
+#   pixi run run-alpine --configfile config/<project>.yml
+#
+# Every job needs a QOS. CPU work goes to `acpu` with `cpu-normal` (24 h
+# ceiling; `cpu-long` for up to 7 days). GPU work goes to the per-GPU-type
+# partitions (`aa100` A100, `ah200` H200, `al40` L40) with `gpu-normal`
+# (24 h) or `gpu-long` (7 d). Partition/QOS names changed on 2026-08-05; both
+# name sets are accepted for now.
+#
+# Memory is COUPLED to CPUs on acpu: DefMemPerCPU = MaxMemPerCPU = 3840 MB,
+# so mem_mb above cpus_per_task x 3840 silently raises the CPU count (and the
+# bill). cpus_per_task below is sized so mem_mb fits.
+#
+# output_directory must be on /scratch/alpine/$USER (see docs/cluster/alpine.md).
+# Every rule that runs singularity (DNAscent) needs dnascent.singularity_setup
+# set to "module load singularity" in the project config.
+
+executor: slurm
+jobs: 200
+latency-wait: 90
+
+rerun-incomplete: true
+keep-going: true
+printshellcmds: true
+show-failed-logs: true
+
+slurm-logdir: "logs/slurm"
+slurm-keep-successful-logs: false
+slurm-delete-logfiles-older-than: 10
+
+# QOS is a per-rule resource (`qos`) rather than the profile-wide slurm-qos,
+# because the profile-wide value is appended after per-rule ones and the two
+# would conflict for GPU rules.
+default-resources:
+  slurm_partition: acpu
+  slurm_account: amc-general
+  qos: cpu-normal
+  runtime: "4h"
+  mem_mb: 7600
+  cpus_per_task: 2
+
+set-resources:
+  # ------------------------------------------------------------------ GPU --
+  # One A100 saturates well on a single sample; gpu-normal caps at 24 h, so a
+  # whole PromethION flowcell of sup basecalling should either be split into
+  # samples or moved to qos gpu-long. dorado.resume makes a re-queue cheap.
+  basecall:
+    slurm_partition: aa100
+    qos: gpu-normal
+    gres: "gpu:1"
+    runtime: "23h"
+    mem_mb: 64000
+    cpus_per_task: 16
+  basecall_run:
+    slurm_partition: aa100
+    qos: gpu-normal
+    gres: "gpu:1"
+    runtime: "23h"
+    mem_mb: 96000
+    cpus_per_task: 16
+  # Unmeasured; see issue #1 for the sizing plan and the CPU-only numbers.
+  dnascent_detect:
+    slurm_partition: aa100
+    qos: gpu-normal
+    gres: "gpu:1"
+    runtime: "23h"
+    mem_mb: 64000
+    cpus_per_task: 16
+  # ------------------------------------------------------------------ CPU --
+  # (mem_mb <= cpus_per_task * 3840)
+  align:
+    runtime: "12h"
+    mem_mb: 60000
+    cpus_per_task: 16
+  demux_run:
+    runtime: "6h"
+    mem_mb: 15000
+    cpus_per_task: 4
+  collect_demuxed_sample:
+    runtime: "2h"
+    mem_mb: 7600
+    cpus_per_task: 2
+  collect_minknow_bams:
+    runtime: "2h"
+    mem_mb: 7600
+    cpus_per_task: 2
+  mm2_index:
+    runtime: "2h"
+    mem_mb: 30000
+    cpus_per_task: 8
+  modkit_pileup:
+    runtime: "8h"
+    mem_mb: 30000
+    cpus_per_task: 8
+  modkit_summary:
+    runtime: "2h"
+    mem_mb: 7600
+    cpus_per_task: 2
+  modkit_extract_calls:
+    runtime: "12h"
+    mem_mb: 45000
+    cpus_per_task: 12
+  modkit_bigwig:
+    runtime: "2h"
+    mem_mb: 15000
+    cpus_per_task: 4
+  modkit_dmr:
+    runtime: "6h"
+    mem_mb: 30000
+    cpus_per_task: 8
+  samtools_qc:
+    runtime: "2h"
+    mem_mb: 7600
+    cpus_per_task: 2
+  mosdepth:
+    runtime: "2h"
+    mem_mb: 7600
+    cpus_per_task: 2
+  dorado_read_summary:
+    runtime: "2h"
+    mem_mb: 7600
+    cpus_per_task: 2
+  dnascent_index:
+    runtime: "2h"
+    mem_mb: 3800
+    cpus_per_task: 1
+  dnascent_sort:
+    runtime: "4h"
+    mem_mb: 15000
+    cpus_per_task: 4
+  dnascent_per_read:
+    runtime: "4h"
+    mem_mb: 3800
+    cpus_per_task: 1
+  # Generous: the pilot barcodes took 4-9 min and 0.5-0.7 GB at 8 threads
+  # (issue #1); re-size once a full-flowcell barcode has been run.
+  dnascent_forksense:
+    runtime: "8h"
+    mem_mb: 30000
+    cpus_per_task: 8
+  custom_sample_step:
+    runtime: "6h"
+    cpus_per_task: 4
+  custom_project_step:
+    runtime: "6h"
+    cpus_per_task: 4

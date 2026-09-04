@@ -1,0 +1,26 @@
+# YAML samples file: barcoded runs, MinKNOW-basecalled runs, per-run references.
+# Point `samples:` in your project config at a file like this.
+runs:
+  # A pooled run the pipeline basecalls itself: one dorado pass over the run
+  # with --kit-name, then `dorado demux` splits it into the samples below.
+  - path: /beevol/data/nanopore/20260901_pooled_run
+    kit: SQK-NBD114-24
+    reference: /beevol/data/ref/chm13v2.0.fa
+    samples:
+      wt_rep1: barcode01
+      mut_rep1: barcode02
+      # per-sample reference override
+      spikein: {barcode: barcode03, reference: /beevol/data/ref/lambda.fa}
+
+  # A MinKNOW live-basecalled run: bam_pass/<barcode>/*.bam are used as-is
+  # (no dorado basecall); pod5_pass/<barcode> is still located for DNAscent.
+  - path: /beevol/home/someone/Nanopore/Fork_Stalling_Pilot1_090326/results
+    basecalled: true
+    samples:
+      fork_12: barcode12
+      fork_15: barcode15
+
+  # An unbarcoded run: the whole run is one sample.
+  - path: /beevol/data/nanopore/20260815_gDNA
+    samples:
+      control: ~

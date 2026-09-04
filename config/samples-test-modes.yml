@@ -1,0 +1,12 @@
+runs:
+  # basecalled once with --kit-name, then dorado demux -> two samples
+  - path: .tests/data/synthetic/pooled
+    kit: SQK-NBD114-24
+    samples:
+      pooled_bc01: barcode01
+      pooled_bc02: barcode02
+  # MinKNOW live-basecalled layout: bam_pass/<barcode>/*.bam + pod5_pass/<barcode>/*.pod5
+  - path: .tests/data/synthetic/minknow
+    basecalled: true
+    samples:
+      minknow_bc03: barcode03

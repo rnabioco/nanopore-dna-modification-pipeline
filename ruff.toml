@@ -1,0 +1,26 @@
+# Ruff configuration.
+#
+# The rule set is declared EXPLICITLY rather than inherited from ruff's
+# defaults, which are not a stable contract between releases. `lint-python`
+# gates CI, so an implicit rule set would let a ruff release turn a green main
+# red on its own. Widening this list is a deliberate change: clear the findings
+# in the same commit that adds the rule.
+
+# The oldest interpreter the pipeline supports (`python = ">=3.11"`; tomllib).
+target-version = "py311"
+
+[lint]
+select = [
+  "E4",   # pycodestyle: imports
+  "E7",   # pycodestyle: statements
+  "E9",   # pycodestyle: syntax/IO errors
+  "F",    # pyflakes
+  "I",    # isort
+  "B",    # flake8-bugbear
+  "SIM",  # flake8-simplify
+  "FURB", # refurb
+  "C4",   # flake8-comprehensions
+  "BLE",  # flake8-blind-except
+  "EXE",  # flake8-executable
+  "RUF",  # ruff-specific
+]

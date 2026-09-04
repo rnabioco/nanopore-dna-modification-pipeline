@@ -1,0 +1,149 @@
+# nanopore-dna-modification-pipeline: main entry point.
+
+from snakemake.utils import min_version
+
+min_version("9.0")
+
+
+configfile: "config/config-base.yml"
+
+
+import datetime
+import os
+import sys
+
+DORADO_VERSION = str(config["dorado"]["version"])
+DORADO_DIR = f"resources/tools/dorado/{DORADO_VERSION}"
+ESCPOD_VERSION = str(config.get("escpod_version", ""))
+ESCPOD_DIR = f"resources/tools/escpod/{ESCPOD_VERSION}"
+
+PIPELINE_START_TIME = datetime.datetime.now(datetime.timezone.utc).isoformat()
+SNAKEFILE_DIR = os.path.dirname(workflow.snakefile)
+PIPELINE_DIR = os.path.dirname(SNAKEFILE_DIR)
+SCRIPT_DIR = os.path.join(SNAKEFILE_DIR, "scripts")
+sys.path.insert(0, SCRIPT_DIR)
+
+
+onstart:
+    import shutil
+    import subprocess
+
+    # Put the pinned tool bins on PATH for every job. scripts/setup-env.sh does
+    # this for a pixi shell, but a cluster job need not have run the activation
+    # hook, so the prefix is what actually guarantees it.
+    dorado_bin_path = os.path.abspath(os.path.join(PIPELINE_DIR, DORADO_DIR, "bin"))
+    escpod_bin_path = os.path.abspath(os.path.join(PIPELINE_DIR, ESCPOD_DIR, "bin"))
+    tool_bins = f"{dorado_bin_path}:{escpod_bin_path}"
+    os.environ["PATH"] = f"{tool_bins}:{os.environ['PATH']}"
+    # The `set -euo pipefail` is load-bearing: shell.prefix() REPLACES
+    # snakemake's default prefix, and that default IS bash strict mode. Without
+    # it a failing `dorado aligner | samtools sort` reports only sort's exit
+    # status and an empty BAM looks like success.
+    shell.prefix(f"set -euo pipefail; export PATH={tool_bins}:$PATH; ")
+    dorado_bin = os.path.join(dorado_bin_path, "dorado")
+    if os.path.isfile(dorado_bin):
+        try:
+            result = subprocess.run(
+                [dorado_bin, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            installed = (result.stderr.strip() or result.stdout.strip()).split("+")[
+                0
+            ]
+            if installed and installed != DORADO_VERSION:
+                logger.warning(
+                    f"Installed dorado ({installed}) does not match dorado.version "
+                    f"({DORADO_VERSION}). Run 'pixi run install-dorado'."
+                )
+        except (OSError, subprocess.SubprocessError):
+            pass
+    elif (
+        any(s["mode"] != "prebasecalled" for s in samples.values())
+        or config["align"]["tool"] == "dorado"
+    ):
+        logger.warning(
+            f"dorado {DORADO_VERSION} is not installed at {dorado_bin_path}. "
+            "Run 'pixi run setup' before submitting jobs."
+        )
+    conda_prefix = os.environ.get("CONDA_PREFIX", "")
+    for tool_name in (
+        "samtools",
+        "minimap2",
+        "modkit",
+        "mosdepth",
+        "bgzip",
+        "tabix",
+    ):
+        tool_path = shutil.which(tool_name)
+        if tool_path is None:
+            logger.warning(
+                f"Tool '{tool_name}' not found in PATH. Run inside `pixi shell`."
+            )
+        elif conda_prefix and not os.path.realpath(tool_path).startswith(
+            os.path.realpath(conda_prefix)
+        ):
+            logger.warning(
+                f"Tool '{tool_name}' resolves to {tool_path}, outside the pixi environment "
+                f"({conda_prefix}); versions may not match pixi.lock."
+            )
+
+
+include: "rules/common.smk"
+include: "rules/basecall.smk"
+include: "rules/align.smk"
+include: "rules/modcall.smk"
+include: "rules/qc.smk"
+include: "rules/custom.smk"
+include: "rules/clean.smk"
+
+
+if config["dnascent"]["enabled"]:
+
+    include: "rules/dnascent.smk"
+
+
+localrules:
+    link_sample_pod5,
+    link_run_pod5,
+    stage_reference,
+    finalize_bam,
+    samples_summary,
+    clean,
+
+
+onsuccess:
+    from generate_manifest import generate_manifest
+
+    generate_manifest(
+        config=config,
+        samples=samples,
+        status="success",
+        start_time=PIPELINE_START_TIME,
+        output_dir=config["output_directory"],
+        pipeline_dir=PIPELINE_DIR,
+        models=MODEL_STACK.to_dict() if MODEL_STACK else None,
+    )
+
+
+onerror:
+    from generate_manifest import generate_manifest
+
+    generate_manifest(
+        config=config,
+        samples=samples,
+        status="failed",
+        start_time=PIPELINE_START_TIME,
+        output_dir=config["output_directory"],
+        pipeline_dir=PIPELINE_DIR,
+        models=MODEL_STACK.to_dict() if MODEL_STACK else None,
+    )
+
+
+report_metadata()
+
+
+rule all:
+    input:
+        pipeline_outputs(),

@@ -1,0 +1,18 @@
+# yamllint configuration. `lint-yaml` gates CI.
+
+extends: default
+
+rules:
+  line-length:
+    max: 120
+  # Single-document YAML throughout; the --- prefix adds nothing.
+  document-start: disable
+  # GitHub Actions REQUIRES the key `on:`, which YAML 1.1 reads as a boolean.
+  # Keep the truthy rule for VALUES (a bare yes/no is a real footgun) and drop
+  # it for keys.
+  truthy:
+    check-keys: false
+  # Snakemake profile keys like `set-resources:` nest deeply; allow comments
+  # with a single space of indentation slack.
+  comments:
+    min-spaces-from-content: 1

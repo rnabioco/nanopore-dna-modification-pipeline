@@ -1,0 +1,89 @@
+[workspace]
+name = "nanopore-dna-modification-pipeline"
+version = "0.1.0"
+description = "Snakemake pipeline for Oxford Nanopore DNA modification analysis: dorado basecalling with stacked modified-base models, genome alignment, modkit summaries, and optional DNAscent"
+channels = ["conda-forge", "bioconda"]
+platforms = ["linux-64"]
+
+[dependencies]
+# Core bioinformatics tools
+samtools = ">=1.20"
+htslib = "*"             # bgzip + tabix for the modkit pileups
+minimap2 = ">=2.28"
+ont-modkit = ">=0.6.1"
+mosdepth = "*"
+bedtools = "*"
+libstdcxx-ng = ">=12"
+pigz = "*"
+# Python
+python = ">=3.11"        # tomllib, for reading dorado model config.toml
+pysam = "*"
+pandas = "*"
+pyarrow = "*"
+pyyaml = "*"
+gitpython = "*"
+# Snakemake and executors
+snakemake = ">=9.17"
+snakemake-executor-plugin-slurm = ">=2.7"
+snakefmt = "*"
+# Linting. ruff is pinned to a minor because its formatter style is only
+# stable within one and `lint-python` gates CI (same reasoning as
+# aa-tRNA-seq-pipeline). The rule set is pinned separately in ruff.toml.
+ruff = "0.16.*"
+yamllint = "*"
+
+[activation]
+scripts = ["scripts/setup-env.sh"]
+
+[tasks]
+# ---------------------------------------------------------------------------
+# One-time setup. Downloads go into resources/tools and resources/models,
+# which are gitignored. Run from ONE node, before submitting cluster jobs, so
+# parallel GPU jobs never race on the same download.
+# ---------------------------------------------------------------------------
+setup = { cmd = "bash scripts/setup-tools.sh all", description = "One-time setup: dorado, the basecalling + modified-base models named in the config, and escpod" }
+install-dorado = { cmd = "bash scripts/setup-tools.sh dorado", description = "Download the pinned dorado release (dorado.version in the config)" }
+install-models = { cmd = "bash scripts/setup-tools.sh models", description = "Download every ONT model the config resolves to (pass --configfile to resolve a project config)" }
+install-escpod = { cmd = "bash scripts/setup-tools.sh escpod", description = "Download the pinned escpod release (POD5 tooling; used by make-test-data)" }
+install-dnascent = { cmd = "bash scripts/install-dnascent.sh", description = "Pull the pinned DNAscent Singularity image (only needed for dnascent.enabled: true)" }
+# Model resolution, from the same code the Snakefile uses.
+list-models = { cmd = "python workflow/scripts/models.py list", description = "Print the simplex + modified-base model stack the config resolves to (accepts --configfile)" }
+check-models = { cmd = "python workflow/scripts/models.py check", description = "Verify every resolved model directory exists and the stack is valid" }
+# Test data
+dl-test-data = { cmd = "bash .tests/dl_test_data.sh", description = "Download the tiny synthetic POD5 fixture + lambda/E. coli reference used by config-test.yml" }
+make-test-data = { cmd = "bash scripts/make-test-data.sh", description = "Subset N reads from a real run into .tests/fixtures/<name> (usage: pixi run make-test-data <run_dir> <name> [n_reads])" }
+# ---------------------------------------------------------------------------
+# Pipeline execution. Trailing arguments are appended, so
+#   pixi run run-bodhi --configfile config/my-project.yml
+# is the normal way to launch a project.
+# ---------------------------------------------------------------------------
+dry-run = { cmd = "snakemake -n --configfile config/config-test.yml", description = "Dry run with the test config" }
+dry-run-modes = { cmd = "snakemake -n --configfile config/config-test-modes.yml", description = "Dry run of the demux + MinKNOW-basecalled input modes" }
+dry-run-dnascent = { cmd = "snakemake -n --configfile config/config-test.yml config/config-test-dnascent.yml", description = "Dry run with the DNAscent rules enabled" }
+dry-run-all = { depends-on = ["dry-run", "dry-run-modes", "dry-run-dnascent"], description = "Every dry-run CI performs" }
+test = { cmd = "snakemake --configfile config/config-test.yml --cores 4", description = "Run the test config locally (needs a GPU for dorado)" }
+run = { cmd = "snakemake --cores 8", description = "Run locally; pass --configfile <project.yml>" }
+run-bodhi = { cmd = "snakemake --profile cluster/bodhi", description = "Run on Bodhi Slurm (rna + gpu partitions); pass --configfile <project.yml>" }
+run-alpine = { cmd = "snakemake --profile cluster/alpine", description = "Run on Alpine Slurm (acpu + aa100 partitions); pass --configfile <project.yml>" }
+clean = { cmd = "snakemake clean --cores 1", description = "Delete large regenerable intermediates from output_directory; pass --configfile <project.yml>" }
+clean-test = { cmd = "snakemake clean --configfile config/config-test.yml --cores 1", description = "Same, for the test run" }
+dag = { cmd = "snakemake --configfile config/config-test.yml --dag | dot -Tpng > docs/workflow_dag.png", description = "Render the DAG of the test config (needs graphviz)" }
+# ---------------------------------------------------------------------------
+# Development
+# ---------------------------------------------------------------------------
+fmt = { cmd = "snakefmt workflow/ && ruff format workflow/scripts/ tests/ scripts/", description = "Format Snakemake and Python files" }
+lint-snakefmt = { cmd = "snakefmt --check workflow/", description = "Check Snakemake formatting" }
+lint-python = { cmd = "ruff check workflow/scripts/ tests/ && ruff format --check workflow/scripts/ tests/", description = "Lint and check Python formatting" }
+lint-yaml = { cmd = "yamllint config/ cluster/ .github/", description = "Lint YAML files (rules in .yamllint.yml)" }
+lint = { depends-on = ["lint-snakefmt", "lint-python", "lint-yaml"], description = "Run every lint gate CI runs" }
+
+[feature.test.dependencies]
+pytest = "*"
+pytest-cov = "*"
+
+[feature.test.tasks]
+test-unit = { cmd = "pytest tests/unit/ -v --cov=workflow/scripts --cov-report=term-missing", description = "Run unit tests with coverage" }
+
+[environments]
+default = []
+test = ["test"]

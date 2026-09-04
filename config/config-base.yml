@@ -1,0 +1,197 @@
+# Base configuration for nanopore-dna-modification-pipeline.
+#
+# This file is loaded by the Snakefile FIRST; a project config passed with
+# --configfile is deep-merged over it, so a project only states what differs.
+# Every key here is documented in config/README.md.
+
+# ---------------------------------------------------------------------------
+# Inputs and outputs
+# ---------------------------------------------------------------------------
+# Samples file: TSV (sample_id, run_path[, reference]) or YAML for barcoded /
+# already-basecalled runs. See config/README.md and config/samples-example.yml.
+samples: config/samples.tsv
+
+# Everything the pipeline writes goes under here. On Alpine this must be on
+# /scratch/alpine; on Bodhi anywhere under /beevol/home is fine.
+output_directory: results
+
+reference:
+  # Genome FASTA (plain or bgzipped). A minimap2 index is built beside the
+  # outputs; the FASTA itself is never copied. A sample may override this
+  # (third TSV column, or `reference:` in the YAML samples file).
+  fasta: null
+  # minimap2 preset used when building the index and aligning.
+  preset: lr:hq
+
+# ---------------------------------------------------------------------------
+# dorado
+# ---------------------------------------------------------------------------
+dorado:
+  # Release installed by `pixi run setup` into resources/tools/dorado/<version>.
+  # 2.1.2 (2026-08-26) is the current release.
+  version: "2.1.2"
+  # `-x`: cuda:all uses every GPU the job was allocated.
+  device: cuda:all
+  # Move tables (`mv` tag) make the uBAM ~2x larger but are required by any
+  # signal-level model run downstream (escpod classify, Remora). Keep on.
+  emit_moves: true
+  # Reads below this mean Q are dropped at basecall time. 0 keeps everything.
+  min_qscore: 0
+  # Adapter/barcode/primer trimming: all | adapters | none
+  trim: all
+  # Barcoded runs (YAML samples file with `kit:`) only.
+  barcode_both_ends: false
+  # Resume an interrupted basecall from its partial output (dorado
+  # --resume-from). The partial file is kept beside the output as
+  # <name>.bam.partial until the rule completes.
+  resume: true
+  # Anything else, verbatim, e.g. "--batchsize 512 --disable-read-splitting".
+  extra_opts: ""
+
+# ---------------------------------------------------------------------------
+# Model stack (resolved by workflow/scripts/models.py; `pixi run list-models`)
+# ---------------------------------------------------------------------------
+models:
+  # ONT models are downloaded here by name (`pixi run install-models`).
+  directory: resources/models
+  # Simplex model. The latest DNA sup model as of dorado 2.1.2. (hac@v6.0.0 is
+  # newer than sup@v5.2.0 but there is no sup@v6 yet.)
+  simplex: dna_r10.4.1_e8.2_400bps_sup@v5.2.0
+  # Modified-base models STACKED on the simplex model. Short codes are
+  # expanded to pinned versions through `mod_versions` below; a full name
+  # (dna_..._sup@v5.2.0_5mC_5hmC@v2) is also accepted. One model per
+  # canonical base: 5mC_5hmC (C) + 6mA (A) stack; 5mC_5hmC + 4mC_5mC do not.
+  modified_bases:
+    - 5mC_5hmC
+    - 6mA
+  # Local dorado-format modified-base model directories (e.g. exported from
+  # Remora with `remora model export`), stacked alongside the ONT ones. Each
+  # entry is a path or {name: ..., path: ...}. Vendor them under
+  # resources/models/custom/ with a README.
+  custom: []
+  # Pinned modified-base model versions per simplex model, used to expand the
+  # short codes above. From `dorado download --list-yaml` (dorado 2.1.x).
+  mod_versions:
+    dna_r10.4.1_e8.2_400bps_sup@v5.2.0:
+      4mC_5mC: v1
+      5mC_5hmC: v2
+      5mCG_5hmCG: v2
+      6mA: v1
+    dna_r10.4.1_e8.2_400bps_hac@v6.0.0:
+      4mC_5mC: v1
+      5mC_5hmC: v1
+      5mCG_5hmCG: v1
+      6mA: v1
+    dna_r10.4.1_e8.2_400bps_sup@v5.0.0:
+      4mC_5mC: v3
+      5mC_5hmC: v3
+      5mCG_5hmCG: v3
+      6mA: v3
+
+# ---------------------------------------------------------------------------
+# Already-basecalled input (MinKNOW live basecalling)
+# ---------------------------------------------------------------------------
+# A run marked `basecalled: true` in the YAML samples file skips dorado and
+# collects MinKNOW's bam_pass/<barcode>/*.bam instead. The models those BAMs
+# carry are whatever MinKNOW ran; the manifest records the @RG line.
+minknow:
+  # Also collect bam_fail (and pod5_fail for DNAscent). Off: pass reads only.
+  include_fail: false
+
+# ---------------------------------------------------------------------------
+# Alignment
+# ---------------------------------------------------------------------------
+align:
+  # dorado: `dorado aligner` (minimap2 inside dorado; keeps every tag, ONT's
+  #         recommended path). minimap2: samtools fastq -T '*' | minimap2 -y.
+  tool: dorado
+  # Extra minimap2 options (both tools). The preset comes from reference.preset.
+  mm2_opts: ""
+  # Records to drop from the final BAM (samtools view -F). 0x904 = unmapped,
+  # secondary, supplementary; set to 4 to keep secondaries/supplementaries.
+  exclude_flags: 0x904
+  min_mapq: 0
+
+# ---------------------------------------------------------------------------
+# modkit (dorado modified-base calls -> tables)
+# ---------------------------------------------------------------------------
+modkit:
+  pileup: true
+  # Pass-threshold on the canonical/mod call confidence. null = modkit's
+  # automatic estimate from a sample of reads (recommended to start).
+  filter_threshold: null
+  # Per-mod thresholds, e.g. {m: 0.8, a: 0.9, h: 0.8}
+  mod_thresholds: {}
+  # CpG-only pileup with strands combined (needs a 5mCG model or 5mC_5hmC).
+  cpg: false
+  combine_strands: false
+  # Additional motifs, each "MOTIF,OFFSET" (modkit --motif), e.g. ["GATC,1"].
+  motifs: []
+  extra_opts: ""
+  # `modkit summary` per sample (fast, sampled).
+  summary: true
+  # Per-read, per-position calls (modkit extract calls). Large; off by default.
+  extract_calls: false
+  # bedMethyl -> one bigWig of mod fraction per mod code (needs pileup).
+  bigwig: false
+
+# Pairwise differential methylation (modkit dmr pair) between two samples.
+# - {name: mut_vs_wt, a: mut_rep1, b: wt_rep1, base: C}
+dmr:
+  contrasts: []
+
+# ---------------------------------------------------------------------------
+# QC
+# ---------------------------------------------------------------------------
+qc:
+  # samtools flagstat/stats always run. mosdepth adds depth summaries.
+  mosdepth: true
+  # `dorado summary` per-read table (length, qscore, alignment).
+  read_summary: true
+
+# ---------------------------------------------------------------------------
+# DNAscent (optional): BrdU/EdU detection and replication fork analysis
+# ---------------------------------------------------------------------------
+dnascent:
+  enabled: false
+  version: "4.2.1"
+  # How to run it. `sif` is a Singularity image (`pixi run install-dnascent`
+  # puts the pinned one at resources/tools/dnascent/<version>/DNAscent.sif;
+  # Bodhi's own copy is /cluster/singularity_images/DNAscent.sif). `command`
+  # names a native binary instead and takes precedence when set.
+  sif: null
+  command: null
+  # Extra bind mounts for singularity. /beevol (Bodhi) and /scratch/alpine +
+  # /projects (Alpine) are bound automatically when they exist.
+  singularity_bind: []
+  # Shell run before singularity, e.g. "module load singularity" on Alpine.
+  singularity_setup: ""
+  # Run `detect` on a GPU (--GPU 0 inside the allocation). On CPU detect is
+  # ~8 threads for a day on a barcode of a P2 flowcell.
+  gpu: true
+  min_mapq: 20
+  min_length: 1000
+  # Per-read BrdU/EdU probability table from the detect modBAM
+  # (dnascent/<sample>/<sample>.per_read.tsv.gz).
+  per_read_probs: true
+  forksense:
+    enabled: true
+    # Order the analogues were pulsed. Match the experiment.
+    order: "EdU,BrdU"
+    opts: "--markAnalogues --markOrigins --markTerminations --markForks --makeSignatures"
+
+# ---------------------------------------------------------------------------
+# Custom steps (see workflow/scripts/custom_steps.py for the contract)
+# ---------------------------------------------------------------------------
+custom: []
+
+# ---------------------------------------------------------------------------
+# Housekeeping
+# ---------------------------------------------------------------------------
+# Auto-delete large regenerable intermediates as the run proceeds. false, true,
+# or a list of tiers: basecall (uBAM from dorado), demux (per-run demux output).
+# `snakemake clean` is the on-demand superset.
+cleanup_intermediates: false
+
+# escpod (rnabioco/escapepod-rs) release for POD5 handling (make-test-data).
+escpod_version: "0.20.0"
