@@ -1,39 +1,153 @@
 # Walkthrough: from POD5 to modification calls
 
-This is the path for someone who has just finished a sequencing run and has a
-directory of POD5 files. By the end you will have aligned modBAMs, per-site
-modification tables and QC for every sample, produced on the cluster from one
-config file. Each step says what to do, what to check, and what can go wrong.
+This is the path for someone who has just finished a sequencing run. It starts
+from nothing on the cluster: clone the pipeline, install it, bring the run
+over with rsync, describe the samples, update the config, and run. By the end
+you will have aligned modBAMs, per-site modification tables and QC for every
+sample. Each step says what to do, what to check, and what can go wrong.
 
-The example throughout is a MinION/PromethION gDNA run of two samples,
-`wt_rep1` and `mut_rep1`, aligned to CHM13v2.0 with 5mC/5hmC and 6mA called.
-Adapt the names and paths.
+The example throughout is a gDNA run of two samples, `wt_rep1` and
+`mut_rep1`, aligned to CHM13v2.0 with 5mC/5hmC and 6mA called, on Bodhi.
+Adapt the names and paths; the Alpine differences are called out where they
+matter.
 
 !!! tip "Already basecalled by MinKNOW?"
     If MinKNOW basecalled the run live with the models you want, you can skip
-    dorado entirely: see [step 3](#3-write-the-samples-file) and set
-    `basecalled: true`. Everything else is identical.
+    dorado entirely: transfer `bam_pass/` along with the POD5 and set
+    `basecalled: true` in [step 6](#6-write-the-samples-file). Everything
+    else is identical.
 
-## 0. Before you start
+## 0. What you need
 
-You need:
-
-- [x] The pipeline installed with `pixi install` and `pixi run setup`
-      ([Installation](installation.md)).
-- [x] The run directory (or directories) on a filesystem the compute nodes can
-      read.
+- [x] An account on Bodhi or Alpine with access to a GPU partition (or a
+      workstation with an NVIDIA GPU for small runs).
+- [x] The run directory MinKNOW wrote, on the sequencer or a machine you can
+      reach with ssh.
 - [x] A reference genome FASTA (plain or bgzipped).
-- [x] A place for the outputs: anywhere under `/beevol/home/$USER` on Bodhi;
-      `/scratch/alpine/$USER/...` on Alpine (never `$HOME` there).
 - [x] For a barcoded run, the barcoding kit name (e.g. `SQK-NBD114-24`) and
       which barcode is which sample.
 
-## 1. Look at the run directory
+## 1. Clone the pipeline and install the environment
+
+Pick a home for code. On Bodhi anywhere under your home directory is fine; on
+Alpine use `/projects/$USER`, never `$HOME` (2 GB).
+
+=== "Bodhi"
+
+    ```bash
+    mkdir -p ~/devel && cd ~/devel
+    git clone https://github.com/rnabioco/nanopore-dna-modification-pipeline.git
+    cd nanopore-dna-modification-pipeline
+    pixi install
+    ```
+
+=== "Alpine"
+
+    ```bash
+    export PIXI_CACHE_DIR=/scratch/alpine/$USER/.cache/pixi     # before the first install
+    mkdir -p /projects/$USER/devel && cd /projects/$USER/devel
+    git clone https://github.com/rnabioco/nanopore-dna-modification-pipeline.git
+    cd nanopore-dna-modification-pipeline
+    pixi install
+    ```
+
+`pixi install` builds `.pixi/envs/default` from the committed lock file:
+snakemake, the Slurm executor, samtools, minimap2, modkit, mosdepth and the
+Python libraries. A few minutes, about 1.4 GB. If `pixi` is not on your PATH
+yet, [Installation](installation.md) covers installing it.
+
+## 2. Install dorado, the models and escpod
+
+```bash
+pixi run setup
+```
+
+Once, from one node. It downloads dorado 2.1.2 (3.4 GB, checksum verified),
+the models the base config names (`sup@v5.2.0` plus its `5mC_5hmC` and `6mA`
+models) and escpod, all under `resources/` in the checkout. Check:
+
+```bash
+pixi run list-models
+```
+
+Every line should say `present`. DNAscent is optional and separate
+(`pixi run install-dnascent`, 5 GB); see [DNAscent](../dnascent.md).
+
+## 3. Transfer the run with rsync
+
+Decide where raw data lives. It is read by every job and is the one thing the
+pipeline never copies, so put it somewhere stable:
+
+| Cluster | Raw data | Notes |
+|---|---|---|
+| Bodhi | `/beevol/home/$USER/data/nanopore/<run>` (or a shared `/beevol/data/...` location) | one shared filesystem; check `sinteractive quota --check` first, a flowcell is 100–700 GB |
+| Alpine | `/scratch/alpine/$USER/data/<run>` | fast, not backed up, purged after ~90 days untouched; archive to PetaLibrary (`/pl/active/<allocation>`) when done |
+
+Then copy the run. Copying takes hours for a PromethION flowcell, so run it as
+a job rather than in your login shell, and use flags that let it resume:
+
+=== "Pull from the cluster"
+
+    ```bash
+    DEST=/beevol/home/$USER/data/nanopore/20260901_gDNA
+    mkdir -p "$DEST"
+    srun -p rna -c 2 --mem 4G -t 12:00:00 -J rsync-run --comment=rsync-run -- \
+        rsync -avP --partial-dir=.rsync-partial \
+        <user>@<sequencer-host>:/data/20260901_gDNA/ "$DEST/"
+    ```
+
+    The compute node needs ssh access to the source (keys in place). On
+    Alpine use the data-transfer partition instead of a general one:
+    `srun -p dtn --qos=dtn ...`.
+
+=== "Push from the sequencer or a laptop"
+
+    ```bash
+    rsync -avP --partial-dir=.rsync-partial \
+        /data/20260901_gDNA/ \
+        <user>@<cluster-login>:/beevol/home/<user>/data/nanopore/20260901_gDNA/
+    ```
+
+    For very large runs on Alpine, Globus is the supported route; see the
+    CURC data-transfer documentation.
+
+What the flags do, and what to watch:
+
+- `-a` keeps timestamps and permissions, `-v` lists files, `-P` is
+  `--partial --progress`: an interrupted copy resumes where it stopped when
+  you run the same command again. `--partial-dir` keeps half-copied files out
+  of the way until they are complete.
+- **Trailing slashes matter.** `source/` copies the *contents* of `source`
+  into `DEST/`; `source` (no slash) creates `DEST/source/`.
+- Do not add `-z`: POD5 is already compressed and compressing it again only
+  costs CPU.
+- Add `--exclude 'fastq_*'` if MinKNOW also wrote FASTQ; the pipeline does not
+  use it. Keep `pod5_pass`, `pod5_fail`, `bam_pass` (if basecalled live) and
+  the `*_summary_*` files.
+
+Verify before going further. Run the same rsync once more with `-n`
+(dry run); it should list nothing. Then compare counts and sizes on both
+sides, and open one file:
+
+```bash
+find "$DEST" -name '*.pod5' | wc -l          # same number as on the sequencer?
+du -sh "$DEST"
+pixi run escpod summary "$DEST"/pod5_pass/*_0.pod5
+```
+
+`escpod summary` prints the flow cell, kit, sample rate and read count. For a
+final byte-level check on an important run, `rsync -avc` (checksums) once.
+
+!!! note "This is the last copy"
+    Everything from here on references `$DEST`. The pipeline hard-links or
+    symlinks the POD5 into its output tree; it never duplicates the run.
+
+## 4. Look at the run directory
 
 MinKNOW writes a run like this:
 
 ```
-/beevol/data/nanopore/20260901_gDNA/
+/beevol/home/me/data/nanopore/20260901_gDNA/
 ├── pod5_pass/            <- what the pipeline uses
 │   ├── PAX12345_pass_0.pod5
 │   └── ...
@@ -47,18 +161,10 @@ A **barcoded** run has one subdirectory per barcode instead:
 `pod5_pass/barcode01/`, `pod5_pass/barcode02/`, ... and `bam_pass/barcode01/`
 if it was basecalled live.
 
-Check what you have:
-
-```bash
-ls /beevol/data/nanopore/20260901_gDNA/pod5_pass | head
-du -sh /beevol/data/nanopore/20260901_gDNA/pod5_pass
-pixi run escpod summary /beevol/data/nanopore/20260901_gDNA/pod5_pass/PAX12345_pass_0.pod5
-```
-
-`escpod summary` prints the flow cell, kit, sample rate and read count of a
-file. The pipeline needs **R10.4.1, 5 kHz** data (kit SQK-LSK114 or a
-barcoding kit of that generation) for the default `dna_r10.4.1_e8.2_400bps`
-models. A 4 kHz file (2022 and earlier) needs a v4.x model instead.
+The pipeline needs **R10.4.1, 5 kHz** data (kit SQK-LSK114 or a barcoding kit
+of that generation) for the default `dna_r10.4.1_e8.2_400bps` models; the
+`escpod summary` line above tells you. A 4 kHz file (2022 and earlier) needs
+a v4.x model instead.
 
 Decide which of the three shapes each sample is:
 
@@ -68,11 +174,7 @@ Decide which of the three shapes each sample is:
 | One pooled run, barcoded, not basecalled with the models you want | `demux` | one dorado pass with `--kit-name`, then `dorado demux` |
 | MinKNOW `bam_pass` already basecalled with the models you want | `prebasecalled` | BAMs used as-is; POD5 only needed for DNAscent |
 
-!!! note "The pipeline never copies POD5"
-    Files are hard-linked (or symlinked across filesystems) into
-    `<output_directory>/pod5/`. A 500 GB run costs nothing extra.
-
-## 2. Pick the reference
+## 5. Pick the reference
 
 Any FASTA works. Put it somewhere shared and stable; the pipeline links it
 into the output tree and builds its own indexes there (`.fai`, minimap2 `.mmi`,
@@ -85,7 +187,7 @@ ls -la /beevol/data/ref/chm13v2.0.fa
 If different samples need different references (a spike-in, another
 organism), the samples file can say so per sample.
 
-## 3. Write the samples file
+## 6. Write the samples file
 
 === "TSV (plain runs)"
 
@@ -94,9 +196,9 @@ organism), the samples file can say so per sample.
     basecalled together).
 
     ```
-    wt_rep1     /beevol/data/nanopore/20260901_gDNA_wt
-    wt_rep1     /beevol/data/nanopore/20260908_gDNA_wt_topup
-    mut_rep1    /beevol/data/nanopore/20260901_gDNA_mut
+    wt_rep1     /beevol/home/me/data/nanopore/20260901_gDNA_wt
+    wt_rep1     /beevol/home/me/data/nanopore/20260908_gDNA_wt_topup
+    mut_rep1    /beevol/home/me/data/nanopore/20260901_gDNA_mut
     ```
 
     A third column overrides the reference for that sample.
@@ -107,7 +209,7 @@ organism), the samples file can say so per sample.
 
     ```yaml
     runs:
-      - path: /beevol/data/nanopore/20260901_pooled
+      - path: /beevol/home/me/data/nanopore/20260901_pooled
         kit: SQK-NBD114-24
         samples:
           wt_rep1: barcode01
@@ -122,7 +224,7 @@ organism), the samples file can say so per sample.
 
     ```yaml
     runs:
-      - path: /beevol/data/nanopore/20260901_pooled
+      - path: /beevol/home/me/data/nanopore/20260901_pooled
         basecalled: true
         samples:
           wt_rep1: barcode01
@@ -133,10 +235,10 @@ Sample ids become directory and file names: letters, digits, `.`, `_`, `-`;
 no spaces. The full format, including per-sample references and mixing
 barcoded and unbarcoded runs, is in [Samples file](../user-guide/samples.md).
 
-## 4. Write the project config
+## 7. Update the config
 
-`config/gdna.yml`. Only what differs from `config/config-base.yml` needs to be
-here; everything else takes the documented default.
+Create `config/gdna.yml`. It is layered over `config/config-base.yml`, so it
+only needs the keys that differ; every other key keeps the documented default.
 
 ```yaml
 samples: config/gdna-samples.tsv
@@ -167,8 +269,7 @@ Choices worth a moment:
 - **Output directory.** A new directory per project. On Alpine it must be on
   `/scratch/alpine`.
 
-Now check that the config resolves to the models you expect, and install any
-that are missing:
+If you changed the models, resolve and install them:
 
 ```bash
 pixi run list-models --configfile config/gdna.yml
@@ -181,7 +282,7 @@ ont_mod    present  dna_r10.4.1_e8.2_400bps_sup@v5.2.0_5mC_5hmC@v2 (canonical C)
 ont_mod    present  dna_r10.4.1_e8.2_400bps_sup@v5.2.0_6mA@v1 (canonical A)
 ```
 
-## 5. Dry run
+## 8. Dry run
 
 Always. It costs seconds and catches most config mistakes before any GPU time
 is spent:
@@ -227,7 +328,7 @@ Things the dry run tells you:
   expected to be `demux` shows `basecall`, the samples file gave it no
   barcode.
 
-## 6. Launch on the cluster
+## 9. Launch on the cluster
 
 The Snakemake controller submits one Slurm job per rule and waits. Run it
 from a login shell or an `sinteractive` session, inside something that
@@ -272,7 +373,7 @@ an hour or two; a full PromethION flowcell is most of a day. If the
 basecall job is killed at its walltime, just relaunch: the partial output is
 kept and dorado resumes from it.
 
-## 7. Monitor
+## 10. Monitor
 
 ```bash
 squeue --me -o "%.10i %.28j %.10P %.10M %.8T %R"      # the jobs Snakemake submitted
@@ -290,7 +391,7 @@ If a job fails, Snakemake keeps going with everything that does not depend on
 it (`keep-going: true`) and exits non-zero at the end. Read the log, fix the
 cause, and run the same command again: finished outputs are not redone.
 
-## 8. What you get
+## 11. What you get
 
 ```
 /beevol/home/me/results/gdna-2026-09/
@@ -324,7 +425,7 @@ To view in IGV, load `bam/final/<sample>.bam` (IGV colours modified bases from
 the MM/ML tags) or set `modkit.bigwig: true` for one bigWig of modification
 fraction per mod code.
 
-## 9. Common next steps
+## 12. Common next steps
 
 - **Compare two samples**: add a `dmr.contrasts` entry
   (`{name: mut_vs_wt, a: mut_rep1, b: wt_rep1, base: C}`) and rerun; you get
@@ -341,11 +442,14 @@ fraction per mod code.
   and POD5 links and keeps `bam/final` and `summary/`. Set
   `cleanup_intermediates: true` in the config to do this automatically during
   the run.
+- **Archive the raw run** (Alpine especially): move `$DEST` to PetaLibrary
+  before the scratch purge, and rerun from there if needed.
 
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
+| rsync stops partway, or `Permission denied (publickey)` from a job | no ssh key from the compute node to the source host | push from the source instead, or set up a key; rerun the same rsync to resume |
 | `no POD5 files found for sample` | wrong path, or a barcoded run without a barcode | check `ls <run>/pod5_pass`; give the barcode in a YAML samples file |
 | `dorado` job fails immediately with a CUDA error | the job did not get a GPU, or ran on a CPU partition | check the profile's `basecall` entry; `nvidia-smi` in the job log |
 | basecall killed at walltime | run larger than the profile's `runtime` | relaunch (resumes), or raise `runtime` for `basecall` |
