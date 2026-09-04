@@ -24,6 +24,7 @@ pixi run dry-run                  # DAG of config/config-test.yml
 pixi run list-models  --configfile config/x.yml
 pixi run run-bodhi    --configfile config/x.yml   # or run-alpine / run
 pixi run lint && pixi run -e test test-unit       # what CI runs
+pixi run -e docs docs-build                        # strict docs build (also a CI gate)
 ```
 
 Heavy work (setup downloads, real runs, fixture building) goes in its own
@@ -48,7 +49,7 @@ config/config-base.yml          every key, documented; projects layer over it
 cluster/bodhi, cluster/alpine   Slurm profiles (partition/account/qos/gres per rule)
 scripts/setup-tools.sh          dorado/models/escpod install with pinned checksums; install-dnascent.sh
 tests/unit                      pytest over the scripts (no data needed)
-docs/                           dnascent.md, custom-steps.md, cluster/*.md, dev-notes/dnascent-onnx-escpod.md
+docs/ + zensical.toml           the documentation site (zensical; `pixi run -e docs docs-build`, deployed to GitHub Pages from main)
 ```
 
 ## Key design points

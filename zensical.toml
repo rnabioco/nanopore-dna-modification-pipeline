@@ -1,0 +1,93 @@
+[project]
+site_name = "nanopore-dna-modification-pipeline"
+site_description = "Oxford Nanopore DNA modification pipeline: dorado basecalling with stacked modified-base models, alignment, modkit, optional DNAscent"
+site_url = "https://rnabioco.github.io/nanopore-dna-modification-pipeline/"
+repo_url = "https://github.com/rnabioco/nanopore-dna-modification-pipeline"
+repo_name = "rnabioco/nanopore-dna-modification-pipeline"
+copyright = "Copyright &copy; 2026 RNA Bioscience Initiative"
+
+nav = [
+  { "Home" = "index.md" },
+  { "Getting Started" = [
+    { "Installation" = "getting-started/installation.md" },
+    { "Walkthrough: from POD5 to modification calls" = "getting-started/walkthrough.md" },
+  ] },
+  { "User Guide" = [
+    { "Samples file" = "user-guide/samples.md" },
+    { "Configuration" = "user-guide/configuration.md" },
+    { "Models" = "user-guide/models.md" },
+    { "Running and monitoring" = "user-guide/running.md" },
+    { "Outputs" = "user-guide/outputs.md" },
+    { "DNAscent" = "dnascent.md" },
+    { "Custom steps" = "custom-steps.md" },
+  ] },
+  { "Clusters" = [
+    { "Bodhi" = "cluster/bodhi.md" },
+    { "Alpine" = "cluster/alpine.md" },
+  ] },
+  { "Development" = [
+    { "Architecture" = "development/architecture.md" },
+    { "Contributing" = "development/contributing.md" },
+    { "DNAscent through escpod (notes)" = "dev-notes/dnascent-onnx-escpod.md" },
+  ] },
+]
+
+[project.theme]
+features = [
+  "navigation.sections",
+  "navigation.expand",
+  "navigation.top",
+  "navigation.indexes",
+  "search.suggest",
+  "search.highlight",
+  "content.code.copy",
+  "content.code.annotate",
+  "content.tabs.link",
+]
+
+[[project.theme.palette]]
+scheme = "default"
+primary = "teal"
+accent = "amber"
+toggle.icon = "material/brightness-7"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+primary = "teal"
+accent = "amber"
+toggle.icon = "material/brightness-4"
+toggle.name = "Switch to light mode"
+
+[project.markdown_extensions.pymdownx.highlight]
+pygments_lang_class = true
+
+[project.markdown_extensions.pymdownx.inlinehilite]
+
+[project.markdown_extensions.pymdownx.snippets]
+
+[[project.markdown_extensions.pymdownx.superfences.custom_fences]]
+name = "mermaid"
+class = "mermaid"
+format = "pymdownx.superfences.fence_code_format"
+
+[project.markdown_extensions.pymdownx.details]
+
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
+
+[project.markdown_extensions.pymdownx.tasklist]
+custom_checkbox = true
+
+[project.markdown_extensions.admonition]
+
+[project.markdown_extensions.tables]
+
+[project.markdown_extensions.attr_list]
+
+[project.markdown_extensions.toc]
+permalink = true
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/rnabioco/nanopore-dna-modification-pipeline"
