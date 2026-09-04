@@ -38,6 +38,19 @@ jobs:
       - name: Dry run with DNAscent enabled
         run: pixi run dry-run-dnascent
 
+  docs:
+    name: Documentation builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Install zensical
+        run: pip install zensical
+      - name: Strict build (broken links fail)
+        run: zensical build --strict
+
   config-validation:
     name: Configuration validation
     runs-on: ubuntu-latest

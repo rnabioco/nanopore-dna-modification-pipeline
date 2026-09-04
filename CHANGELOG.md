@@ -17,5 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-project summary table, optional DNAscent (index, detect, per-read
   BrdU/EdU table, forkSense), config-driven custom steps, Bodhi and Alpine
   Slurm profiles, unit tests and CI.
+- Documentation site (zensical, GitHub Pages) with an installation guide, a
+  step-by-step walkthrough from a POD5 run directory to modification calls,
+  and user-guide pages for the samples file, configuration, models, running,
+  and outputs; the README now points at it.
 
 [Unreleased]: https://github.com/rnabioco/nanopore-dna-modification-pipeline/commits/main

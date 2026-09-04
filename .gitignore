@@ -40,6 +40,8 @@ resources/ref/*
 
 # pixi
 .pixi/
+# zensical build output
+site/
 # python
 __pycache__/
 .coverage
